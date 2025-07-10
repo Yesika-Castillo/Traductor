@@ -16,7 +16,7 @@ interface TranslationResponse {
   to: string;
 }
 
-const API_BASE_URL = 'http://localhost:3001';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
 
 // Reconocimiento de voz (Web Speech API)
 const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -133,7 +133,7 @@ function App() {
     error: speechError,
     startListening,
     stopListening
-  } = useSpeechToText((recognizedText, isFinal) => {
+  } = useSpeechToText((recognizedText) => {
     setInputText(recognizedText);
     debouncedTranslate(recognizedText, fromLanguage, toLanguage);
   });
