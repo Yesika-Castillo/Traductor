@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './App.css';
+// Eliminada importación de react-audio-visualizer
+import VoiceWave from './VoiceWave';
 
 interface Language {
   code: string;
@@ -87,15 +89,52 @@ function useSpeechToText(onResult: (text: string, isFinal: boolean) => void) {
   return { listening, error, startListening, stopListening };
 }
 
-// Utilidad para reproducir texto con voz
-function speakText(text: string, lang: string) {
+// Hook para obtener y seleccionar voces filtradas por idioma
+function useVoices(lang: string) {
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [selectedVoice, setSelectedVoice] = useState<string>('');
+
+  useEffect(() => {
+    const updateVoices = () => {
+      const allVoices = window.speechSynthesis.getVoices();
+      // Filtrar voces que coincidan con el idioma seleccionado
+      const filtered = allVoices.filter(v => v.lang.toLowerCase().startsWith(lang.toLowerCase()));
+      setVoices(filtered);
+      // Seleccionar automáticamente la primera voz disponible para el idioma
+      if (filtered.length) {
+        setSelectedVoice(filtered[0].name);
+      } else {
+        setSelectedVoice('');
+      }
+    };
+    updateVoices();
+    window.speechSynthesis.onvoiceschanged = updateVoices;
+    // eslint-disable-next-line
+  }, [lang]);
+
+  // Si el idioma cambia y la voz seleccionada ya no está en la lista, selecciona la primera
+  useEffect(() => {
+    if (voices.length && !voices.find(v => v.name === selectedVoice)) {
+      setSelectedVoice(voices[0].name);
+    }
+  }, [voices, selectedVoice]);
+
+  return { voices, selectedVoice, setSelectedVoice };
+}
+
+// Utilidad para reproducir texto con voz y voz seleccionada
+function speakText(text: string, lang: string, voiceName?: string) {
   if (!window.speechSynthesis) return;
   const utterance = new window.SpeechSynthesisUtterance(text);
   utterance.lang = lang;
-  // Seleccionar una voz adecuada si existe
   const voices = window.speechSynthesis.getVoices();
-  const match = voices.find(v => v.lang.toLowerCase().startsWith(lang.toLowerCase()));
-  if (match) utterance.voice = match;
+  if (voiceName) {
+    const match = voices.find(v => v.name === voiceName);
+    if (match) utterance.voice = match;
+  } else {
+    const match = voices.find(v => v.lang.toLowerCase().startsWith(lang.toLowerCase()));
+    if (match) utterance.voice = match;
+  }
   window.speechSynthesis.speak(utterance);
 }
 
@@ -108,6 +147,41 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [charCount, setCharCount] = useState(0);
+
+  // Hook para reconocimiento de voz en español (debe ir antes de cualquier uso de isListening)
+  const {
+    listening: isListening,
+    error: speechError,
+    startListening,
+    stopListening
+  } = useSpeechToText((recognizedText) => {
+    setInputText(recognizedText);
+    debouncedTranslate(recognizedText, fromLanguage, toLanguage);
+  });
+
+  // Para selector de voz
+  const { voices, selectedVoice, setSelectedVoice } = useVoices(toLanguage);
+
+  // Hablar traducción aleatoriamente mientras se reconoce voz
+  useEffect(() => {
+    if (!isListening) return;
+    let interval: NodeJS.Timeout;
+    interval = setInterval(() => {
+      if (translatedText && Math.random() > 0.5) {
+        speakText(translatedText, toLanguage, selectedVoice);
+      }
+    }, 2000); // cada 2 segundos, 50% de probabilidad
+    return () => clearInterval(interval);
+  }, [isListening, translatedText, toLanguage, selectedVoice]);
+
+  // Leer automáticamente la traducción en tiempo real
+  useEffect(() => {
+    if (translatedText && selectedVoice) {
+      window.speechSynthesis.cancel();
+      speakText(translatedText, toLanguage, selectedVoice);
+    }
+    // eslint-disable-next-line
+  }, [translatedText, selectedVoice, toLanguage]);
 
   // Cargar idiomas disponibles al montar el componente
   useEffect(() => {
@@ -126,17 +200,6 @@ function App() {
       handleTranslateRealtime(text, from, to);
     }, 500)
   ).current;
-
-  // Hook para reconocimiento de voz en español
-  const {
-    listening: isListening,
-    error: speechError,
-    startListening,
-    stopListening
-  } = useSpeechToText((recognizedText) => {
-    setInputText(recognizedText);
-    debouncedTranslate(recognizedText, fromLanguage, toLanguage);
-  });
 
   // Traducción en tiempo real (no muestra loading ni error)
   const handleTranslateRealtime = async (text: string, from: string, to: string) => {
@@ -217,32 +280,10 @@ function App() {
     // Aquí podrías mostrar una notificación de éxito
   };
 
-  // Función para reproducir el texto traducido
-  const handleSpeak = () => {
-    if (!translatedText) return;
-    // Buscar el código de idioma de destino (por ejemplo, 'en' -> 'en-US')
-    let langCode = toLanguage;
-    // Opcional: puedes mapear a variantes más comunes si lo deseas
-    if (langCode === 'en') langCode = 'en-US';
-    if (langCode === 'es') langCode = 'es-ES';
-    if (langCode === 'fr') langCode = 'fr-FR';
-    if (langCode === 'de') langCode = 'de-DE';
-    if (langCode === 'it') langCode = 'it-IT';
-    if (langCode === 'pt') langCode = 'pt-PT';
-    if (langCode === 'ru') langCode = 'ru-RU';
-    if (langCode === 'ja') langCode = 'ja-JP';
-    if (langCode === 'ko') langCode = 'ko-KR';
-    if (langCode === 'zh') langCode = 'zh-CN';
-    if (langCode === 'ar') langCode = 'ar-SA';
-    if (langCode === 'hi') langCode = 'hi-IN';
-    speakText(translatedText, langCode);
-  };
-
   return (
     <div className="app">
       <header className="app-header">
-        <h1>🌍 Traductor Universal</h1>
-        <p>Traduce texto entre múltiples idiomas de forma rápida y precisa</p>
+        <h1 style={{fontSize: '2.2rem', fontWeight: 800, letterSpacing: '1.5px', marginBottom: 0}}>🌍 Traductor Universal</h1>
       </header>
 
       <main className="app-main">
@@ -262,6 +303,7 @@ function App() {
                 ))}
               </select>
               <span className="char-count">{charCount}/5000</span>
+              {/* En el render, vuelve a mostrar el botón de micrófono: */}
               <button
                 type="button"
                 className={`btn btn-secondary mic-btn${isListening ? ' listening' : ''}`}
@@ -331,8 +373,29 @@ function App() {
                   </option>
                 ))}
               </select>
+              <select
+                value={selectedVoice}
+                onChange={e => setSelectedVoice(e.target.value)}
+                className="language-select"
+                style={{ marginLeft: '1rem' }}
+                title="Selecciona la voz para escuchar la traducción"
+                disabled={voices.length === 0}
+              >
+                {voices.length === 0 ? (
+                  <option value="">No hay voces para este idioma</option>
+                ) : (
+                  voices.map(voice => (
+                    <option key={voice.name} value={voice.name}>
+                      {voice.name} ({voice.lang})
+                    </option>
+                  ))
+                )}
+              </select>
             </div>
             
+            {/* Visualizador de onda de voz personalizado */}
+            {isListening && <VoiceWave />}
+
             <textarea
               value={translatedText}
               readOnly
@@ -348,15 +411,6 @@ function App() {
                 disabled={!translatedText}
               >
                 📋 Copiar
-              </button>
-              <button
-                onClick={handleSpeak}
-                className="btn btn-secondary"
-                disabled={!translatedText}
-                style={{ marginLeft: '0.5rem' }}
-                title="Escuchar traducción"
-              >
-                🔊 Escuchar
               </button>
             </div>
           </div>

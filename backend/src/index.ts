@@ -145,7 +145,6 @@ app.use((error: any, req: express.Request, res: express.Response, next: express.
   });
 });
 
-// Iniciar servidor
 app.listen(PORT, () => {
   console.log(`🚀 Servidor de traducción ejecutándose en http://localhost:${PORT}`);
   console.log(`📝 Endpoint de traducción: POST http://localhost:${PORT}/api/translate`);
